@@ -1,6 +1,9 @@
 package broker
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 type Message struct {
 	ID      string
@@ -26,6 +29,7 @@ type Broker struct {
 
 	msgsCh    chan Message
 	msgAckCh  chan string
+	unackedMu sync.RWMutex
 	unacked   map[string]Message
 	deliverCh chan struct{}
 
@@ -66,11 +70,16 @@ func (b *Broker) Run() {
 			topic := b.getOrCreateTopic(msg.Topic)
 			topic.queue.Enqueue(msg)
 
+			b.unacked[msg.ID] = msg
+
 			b.deliverSignal()
 
 		case <-b.deliverCh:
 			fmt.Println("delivering")
 			b.deliverMessages()
+
+		case msgID := <-b.msgAckCh:
+			b.ack(msgID)
 
 		case <-b.quitCh:
 			return
@@ -84,6 +93,31 @@ func (b *Broker) Register(req SubscribeRequest) {
 
 func (b *Broker) Publish(msg Message) {
 	b.msgsCh <- msg
+}
+
+func (b *Broker) Ack(msgID string) {
+	b.msgAckCh <- msgID
+}
+
+func (b *Broker) Unacked() []Message {
+	b.unackedMu.Lock()
+	defer b.unackedMu.Unlock()
+
+	msgs := make([]Message, len(b.unacked))
+
+	i := 0
+	for _, msg := range b.unacked {
+		msgs[i] = msg
+		i++
+	}
+
+	return msgs
+}
+
+func (b *Broker) ack(msgID string) {
+	b.unackedMu.Lock()
+	delete(b.unacked, msgID)
+	b.unackedMu.Unlock()
 }
 
 func (b *Broker) deliverSignal() {
@@ -115,7 +149,9 @@ func (b *Broker) deliverMessages() {
 				}
 
 				// TODO: ack for many consumers
+				b.unackedMu.Lock()
 				b.unacked[message.ID] = message
+				b.unackedMu.Unlock()
 			}
 		}
 	}
