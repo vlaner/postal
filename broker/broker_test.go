@@ -7,18 +7,40 @@ import (
 	"github.com/vlaner/postal/broker"
 )
 
+type testPubSub struct {
+	t  *testing.T
+	ch chan broker.Message
+	b  *broker.Broker
+}
+
+func newTestPubSub(t *testing.T, b *broker.Broker) *testPubSub {
+	return &testPubSub{
+		t:  t,
+		ch: make(chan broker.Message, 1),
+		b:  b,
+	}
+}
+
+func (ps *testPubSub) subscribe(topic string) {
+	ps.b.Register(broker.SubscribeRequest{
+		Topic:     topic,
+		ConsumeCh: ps.ch,
+	})
+}
+
+func (ps *testPubSub) publish(msg broker.Message) {
+	ps.b.Publish(msg)
+}
+
+func (ps *testPubSub) readMessage() broker.Message {
+	return <-ps.ch
+}
+
 func TestSimple(t *testing.T) {
 	b := broker.NewBroker()
 	go b.Run()
 
 	topic := "test"
-	subCh := make(chan broker.Message, 1)
-	cons := broker.SubscribeRequest{
-		Topic:     topic,
-		ConsumeCh: subCh,
-	}
-
-	b.Register(cons)
 
 	payload := "testpayload"
 	msg := broker.Message{
@@ -27,16 +49,11 @@ func TestSimple(t *testing.T) {
 		Payload: payload,
 	}
 
-	sendWait := make(chan struct{})
-	go func() {
-		<-sendWait
-		t.Log("about to publish")
-		b.Publish(msg)
-		t.Log("published")
-	}()
+	tc := newTestPubSub(t, b)
+	tc.subscribe(topic)
+	tc.publish(msg)
 
-	sendWait <- struct{}{}
-	got := <-cons.ConsumeCh
+	got := tc.readMessage()
 	t.Logf("GOT %+v", got)
 	if got.Payload != payload {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
@@ -50,13 +67,6 @@ func TestMessageAck(t *testing.T) {
 	go b.Run()
 
 	topic := "test"
-	subCh := make(chan broker.Message, 1)
-	cons := broker.SubscribeRequest{
-		Topic:     topic,
-		ConsumeCh: subCh,
-	}
-
-	b.Register(cons)
 
 	payload := "testpayload"
 	msg := broker.Message{
@@ -65,16 +75,11 @@ func TestMessageAck(t *testing.T) {
 		Payload: payload,
 	}
 
-	sendWait := make(chan struct{})
-	go func() {
-		<-sendWait
-		t.Log("about to publish")
-		b.Publish(msg)
-		t.Log("published")
-	}()
+	tc := newTestPubSub(t, b)
+	tc.subscribe(topic)
+	tc.publish(msg)
+	got := tc.readMessage()
 
-	sendWait <- struct{}{}
-	got := <-cons.ConsumeCh
 	t.Logf("GOT %+v", got)
 	if got.Payload != payload {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
@@ -92,6 +97,7 @@ func TestMessageAck(t *testing.T) {
 	}
 
 	b.Ack(msg.ID)
+	// TODO: better way to sync
 	runtime.Gosched()
 	unacked = b.Unacked()
 	t.Log("unacked2", unacked)
@@ -107,14 +113,6 @@ func TestMessageNack(t *testing.T) {
 	go b.Run()
 
 	topic := "test"
-	subCh := make(chan broker.Message, 1)
-	cons := broker.SubscribeRequest{
-		Topic:     topic,
-		ConsumeCh: subCh,
-	}
-
-	b.Register(cons)
-
 	payload := "testpayload"
 	msg := broker.Message{
 		ID:      "test",
@@ -122,16 +120,11 @@ func TestMessageNack(t *testing.T) {
 		Payload: payload,
 	}
 
-	sendWait := make(chan struct{})
-	go func() {
-		<-sendWait
-		t.Log("about to publish")
-		b.Publish(msg)
-		t.Log("published")
-	}()
+	tc := newTestPubSub(t, b)
+	tc.subscribe(topic)
+	tc.publish(msg)
+	got := tc.readMessage()
 
-	sendWait <- struct{}{}
-	got := <-cons.ConsumeCh
 	t.Logf("GOT %+v", got)
 	if got.Payload != payload {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
@@ -150,6 +143,8 @@ func TestMessageNack(t *testing.T) {
 
 	b.Nack(msg.ID)
 	t.Log("nacked", msg.ID)
+
+	// TODO: better way to sync
 	runtime.Gosched()
 
 	unacked = b.Unacked()
@@ -157,7 +152,7 @@ func TestMessageNack(t *testing.T) {
 		t.Error("unexpected unacked len of 0")
 	}
 
-	gotAfterNack := <-cons.ConsumeCh
+	gotAfterNack := tc.readMessage()
 	t.Logf("GOT AFTER NACK %+v", got)
 	if got.Payload != payload {
 		t.Errorf("got wrong payload after nack: expected %+v got %+v", payload, gotAfterNack.Payload)
