@@ -28,6 +28,7 @@ type Broker struct {
 
 	msgsCh    chan Message
 	msgAckCh  chan string
+	msgNackCh chan string
 	unackedMu sync.RWMutex
 	unacked   map[string]Message
 	deliverCh chan struct{}
@@ -37,11 +38,12 @@ type Broker struct {
 
 func NewBroker() *Broker {
 	b := &Broker{
-		topics:   make(map[string]*Topic),
-		msgsCh:   make(chan Message),
-		register: make(chan SubscribeRequest),
-		msgAckCh: make(chan string),
-		unacked:  make(map[string]Message),
+		topics:    make(map[string]*Topic),
+		msgsCh:    make(chan Message),
+		register:  make(chan SubscribeRequest),
+		msgAckCh:  make(chan string),
+		msgNackCh: make(chan string),
+		unacked:   make(map[string]Message),
 
 		// deliver channel size of 1 because we have single goroutine to handle channel
 		deliverCh: make(chan struct{}, 1),
@@ -75,6 +77,9 @@ func (b *Broker) Run() {
 		case msgID := <-b.msgAckCh:
 			b.ack(msgID)
 
+		case msgID := <-b.msgNackCh:
+			b.nack(msgID)
+
 		case <-b.quitCh:
 			return
 		}
@@ -91,6 +96,10 @@ func (b *Broker) Publish(msg Message) {
 
 func (b *Broker) Ack(msgID string) {
 	b.msgAckCh <- msgID
+}
+
+func (b *Broker) Nack(msgID string) {
+	b.msgNackCh <- msgID
 }
 
 func (b *Broker) Unacked() []Message {
@@ -112,6 +121,23 @@ func (b *Broker) ack(msgID string) {
 	b.unackedMu.Lock()
 	delete(b.unacked, msgID)
 	b.unackedMu.Unlock()
+}
+
+func (b *Broker) nack(msgID string) {
+	b.unackedMu.Lock()
+	defer b.unackedMu.Unlock()
+
+	msg, ok := b.unacked[msgID]
+	if !ok {
+		return
+	}
+
+	delete(b.unacked, msgID)
+
+	msgTopic := b.getOrCreateTopic(msg.Topic)
+	msgTopic.queue.Enqueue(msg)
+
+	b.deliverSignal()
 }
 
 func (b *Broker) deliverSignal() {
