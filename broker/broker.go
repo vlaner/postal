@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -56,8 +55,6 @@ func (b *Broker) Run() {
 	for {
 		select {
 		case sub := <-b.register:
-			fmt.Println("registered", sub)
-
 			topic := b.getOrCreateTopic(sub.Topic)
 			topic.consumers = append(topic.consumers, sub.ConsumeCh)
 			b.topics[sub.Topic] = topic
@@ -65,8 +62,6 @@ func (b *Broker) Run() {
 			b.deliverSignal()
 
 		case msg := <-b.msgsCh:
-			fmt.Println("GOT MESSAGE", msg)
-
 			topic := b.getOrCreateTopic(msg.Topic)
 			topic.queue.Enqueue(msg)
 
@@ -75,7 +70,6 @@ func (b *Broker) Run() {
 			b.deliverSignal()
 
 		case <-b.deliverCh:
-			fmt.Println("delivering")
 			b.deliverMessages()
 
 		case msgID := <-b.msgAckCh:
@@ -124,7 +118,6 @@ func (b *Broker) deliverSignal() {
 	select {
 	case b.deliverCh <- struct{}{}:
 	default:
-		fmt.Println("deliver is full")
 	}
 }
 
