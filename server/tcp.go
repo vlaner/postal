@@ -108,6 +108,7 @@ func (s *TCPServer) handleConn(c net.Conn) {
 				}
 
 				log.Println("server: from read connection:", err)
+				continue
 			}
 
 			log.Printf("server: received message %s\n", string(bytesData))
