@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -94,14 +93,14 @@ func (s *TCPServer) handleConn(c net.Conn) {
 	defer c.Close()
 	defer s.connWg.Done()
 
-	r := bufio.NewReader(c)
+	r := NewProtoReader(c)
 
 	for {
 		select {
 		case <-s.quit:
 			return
 		default:
-			bytesData, err := r.ReadBytes('\n')
+			proto, err := r.Parse()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					return
@@ -111,7 +110,7 @@ func (s *TCPServer) handleConn(c net.Conn) {
 				continue
 			}
 
-			log.Printf("server: received message %s\n", string(bytesData))
+			log.Printf("server: received message %+v\n", proto)
 		}
 	}
 }

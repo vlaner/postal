@@ -24,7 +24,7 @@ func TestSimpleServer(t *testing.T) {
 		t.Errorf("unexpected dial error: %v", err)
 	}
 
-	_, err = clientConn.Write([]byte("TESTING\n"))
+	_, err = clientConn.Write([]byte("SUB\r\nTEST\r\nTEST"))
 	if err != nil {
 		t.Errorf("unexpected write to server error: %v", err)
 	}
