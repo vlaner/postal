@@ -24,10 +24,16 @@ func TestSimpleServer(t *testing.T) {
 		t.Errorf("unexpected dial error: %v", err)
 	}
 
-	_, err = clientConn.Write([]byte("SUB TEST"))
+	_, err = clientConn.Write([]byte("SUB TEST\r\n"))
 	if err != nil {
 		t.Errorf("unexpected write to server error: %v", err)
 	}
+	buf := make([]byte, 128)
+	n, err := clientConn.Read(buf)
+	if err != nil {
+		t.Errorf("unexpected read from server error: %v", err)
+	}
+	t.Logf("GOT FROM SERVER %s", buf[:n])
 	clientConn.Close()
 
 	err = s.Stop(ctx)

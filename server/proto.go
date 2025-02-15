@@ -34,7 +34,12 @@ type Proto struct {
 }
 
 func (p Proto) Marshal() []byte {
-	return []byte(fmt.Sprintf("%s\r\n%s\r\n%s", p.Command, p.Topic, p.Data))
+	switch p.Command {
+	case string(MESSAGE):
+		return []byte(fmt.Sprintf("%s %s %d\r\n%s", p.Command, p.Topic, len(p.Data), p.Data))
+	}
+
+	return nil
 }
 
 type ProtoReader struct {

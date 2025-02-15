@@ -94,6 +94,7 @@ func (s *TCPServer) handleConn(c net.Conn) {
 	defer s.connWg.Done()
 
 	r := NewProtoReader(c)
+	w := NewProtoWriter(c)
 
 	for {
 		select {
@@ -111,6 +112,10 @@ func (s *TCPServer) handleConn(c net.Conn) {
 			}
 
 			log.Printf("server: received message %+v\n", proto)
+			err = w.Write(Proto{Command: string(MESSAGE), Topic: "test", PayloadLen: 4, Data: []byte("TEST")})
+			if err != nil {
+				log.Printf("server: write to client %v\n", proto)
+			}
 		}
 	}
 }
