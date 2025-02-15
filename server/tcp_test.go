@@ -5,11 +5,19 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/vlaner/postal/broker"
 )
 
+type fakeBroker struct{}
+
+func (b fakeBroker) Publish(broker.Message)           {}
+func (b fakeBroker) Register(broker.SubscribeRequest) {}
+
 func TestSimpleServer(t *testing.T) {
+	b := fakeBroker{}
 	port := ":9090"
-	s, err := NewServer(port)
+	s, err := NewServer(port, b)
 	if err != nil {
 		t.Errorf("unexpected new server error: %v", err)
 	}

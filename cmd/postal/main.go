@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vlaner/postal/broker"
 	"github.com/vlaner/postal/server"
 )
 
@@ -19,7 +20,10 @@ func main() {
 }
 
 func run() error {
-	srv, err := server.NewServer(":8080")
+	broker := broker.NewBroker()
+	go broker.Run()
+
+	srv, err := server.NewServer(":8080", broker)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

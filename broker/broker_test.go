@@ -1,6 +1,7 @@
 package broker_test
 
 import (
+	"bytes"
 	"runtime"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestSimple(t *testing.T) {
 
 	topic := "test"
 
-	payload := "testpayload"
+	payload := []byte("testpayload")
 	msg := broker.Message{
 		ID:      "test",
 		Topic:   topic,
@@ -55,7 +56,7 @@ func TestSimple(t *testing.T) {
 
 	got := tc.readMessage()
 	t.Logf("GOT %+v", got)
-	if got.Payload != payload {
+	if !bytes.Equal(got.Payload, payload) {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
 	}
 
@@ -68,7 +69,7 @@ func TestMessageAck(t *testing.T) {
 
 	topic := "test"
 
-	payload := "testpayload"
+	payload := []byte("testpayload")
 	msg := broker.Message{
 		ID:      "test",
 		Topic:   topic,
@@ -81,7 +82,7 @@ func TestMessageAck(t *testing.T) {
 	got := tc.readMessage()
 
 	t.Logf("GOT %+v", got)
-	if got.Payload != payload {
+	if !bytes.Equal(got.Payload, payload) {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
 	}
 
@@ -113,7 +114,7 @@ func TestMessageNack(t *testing.T) {
 	go b.Run()
 
 	topic := "test"
-	payload := "testpayload"
+	payload := []byte("testpayload")
 	msg := broker.Message{
 		ID:      "test",
 		Topic:   topic,
@@ -126,7 +127,7 @@ func TestMessageNack(t *testing.T) {
 	got := tc.readMessage()
 
 	t.Logf("GOT %+v", got)
-	if got.Payload != payload {
+	if !bytes.Equal(got.Payload, payload) {
 		t.Errorf("got wrong payload: expected %+v got %+v", payload, got.Payload)
 	}
 
@@ -154,7 +155,7 @@ func TestMessageNack(t *testing.T) {
 
 	gotAfterNack := tc.readMessage()
 	t.Logf("GOT AFTER NACK %+v", got)
-	if got.Payload != payload {
+	if !bytes.Equal(got.Payload, payload) {
 		t.Errorf("got wrong payload after nack: expected %+v got %+v", payload, gotAfterNack.Payload)
 	}
 

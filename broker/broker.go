@@ -7,7 +7,7 @@ import (
 type Message struct {
 	ID      string
 	Topic   string
-	Payload any
+	Payload []byte
 }
 
 type Topic struct {

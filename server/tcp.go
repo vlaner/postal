@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,27 +11,43 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/vlaner/postal/broker"
 )
+
+type Client struct {
+	conn  net.Conn
+	msgCh chan broker.Message
+}
+
+type Broker interface {
+	Publish(msg broker.Message)
+	Register(req broker.SubscribeRequest)
+}
 
 type TCPServer struct {
 	Addr string
 	ln   net.Listener
 
-	connWg sync.WaitGroup
-	quit   chan struct{}
+	broker  Broker
+	clients sync.Map
+	connWg  sync.WaitGroup
+	quit    chan struct{}
 }
 
-func NewServer(addr string) (*TCPServer, error) {
+func NewServer(addr string, broker Broker) (*TCPServer, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("server: listen on %s: %w", addr, err)
 	}
 
 	srv := &TCPServer{
-		Addr:   addr,
-		ln:     ln,
-		connWg: sync.WaitGroup{},
-		quit:   make(chan struct{}, 1),
+		Addr:    addr,
+		ln:      ln,
+		broker:  broker,
+		clients: sync.Map{},
+		connWg:  sync.WaitGroup{},
+		quit:    make(chan struct{}, 1),
 	}
 
 	return srv, nil
@@ -84,17 +102,42 @@ func (s *TCPServer) acceptLoop() {
 			tcpConn.SetKeepAlivePeriod(30 * time.Minute)
 
 			s.connWg.Add(1)
-			go s.handleConn(tcpConn)
+			client := Client{msgCh: make(chan broker.Message, 1), conn: tcpConn}
+			s.clients.Store(tcpConn, client)
+			go s.handleClient(client)
 		}
 	}
 }
 
-func (s *TCPServer) handleConn(c net.Conn) {
-	defer c.Close()
+func (s *TCPServer) handleClient(client Client) {
+	defer client.conn.Close()
 	defer s.connWg.Done()
+	defer func() {
+		s.clients.Delete(client.conn)
+	}()
 
-	r := NewProtoReader(c)
-	w := NewProtoWriter(c)
+	r := NewProtoReader(client.conn)
+	w := NewProtoWriter(client.conn)
+
+	// TODO: refactor
+	go func() {
+		for {
+			select {
+			case <-s.quit:
+				return
+			case msg := <-client.msgCh:
+				err := w.Write(Proto{Command: string(MESSAGE), Topic: msg.Topic, PayloadLen: len(msg.Payload), Data: msg.Payload})
+				if err != nil {
+					log.Printf("server: write proto to client %v\n", err)
+				}
+			}
+		}
+	}()
+
+	err := w.Write(Proto{Command: string(MESSAGE), Topic: "$WELCOME", PayloadLen: 0, Data: []byte("")})
+	if err != nil {
+		log.Printf("server: write welcome to client %v\n", err)
+	}
 
 	for {
 		select {
@@ -112,10 +155,29 @@ func (s *TCPServer) handleConn(c net.Conn) {
 			}
 
 			log.Printf("server: received message %+v\n", proto)
-			err = w.Write(Proto{Command: string(MESSAGE), Topic: "test", PayloadLen: 4, Data: []byte("TEST")})
-			if err != nil {
-				log.Printf("server: write to client %v\n", proto)
+
+			switch proto.Command {
+			case string(SUBSCRIBE):
+				s.broker.Register(broker.SubscribeRequest{Topic: proto.Topic, ConsumeCh: client.msgCh})
+			case string(PUBLISH):
+				msgID, err := generateMessageID()
+				if err != nil {
+					log.Printf("server: generate message ID %v\n", err)
+					continue
+				}
+
+				s.broker.Publish(broker.Message{ID: msgID, Topic: proto.Topic, Payload: proto.Data})
 			}
 		}
 	}
+}
+
+func generateMessageID() (string, error) {
+	bytes := make([]byte, 16)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(bytes), nil
 }
