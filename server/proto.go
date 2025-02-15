@@ -36,7 +36,7 @@ type Proto struct {
 func (p Proto) Marshal() []byte {
 	switch p.Command {
 	case string(MESSAGE):
-		return []byte(fmt.Sprintf("%s %s %d\r\n%s", p.Command, p.Topic, len(p.Data), p.Data))
+		return []byte(fmt.Sprintf("%s %s %d\r\n%s\r\n", p.Command, p.Topic, len(p.Data), p.Data))
 	}
 
 	return nil
@@ -93,7 +93,7 @@ func (p *ProtoReader) Parse() (Proto, error) {
 		}
 
 		return Proto{
-			Command: string(PUBLISH),
+			Command: string(SUBSCRIBE),
 			Topic:   string(tokens[1]),
 		}, nil
 	}
