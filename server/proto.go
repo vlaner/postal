@@ -81,6 +81,16 @@ func (p *ProtoReader) Parse() (Proto, error) {
 			PayloadLen: payloadLen,
 			Data:       payload,
 		}, nil
+
+	case bytes.HasPrefix(line, SUBSCRIBE):
+		if len(tokens) < 2 {
+			return Proto{}, WrongTokensNumber(2, len(tokens))
+		}
+
+		return Proto{
+			Command: string(PUBLISH),
+			Topic:   string(tokens[1]),
+		}, nil
 	}
 
 	return Proto{}, WrongCommand(string(tokens[0]))
