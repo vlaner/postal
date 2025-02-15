@@ -3,14 +3,22 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/textproto"
+	"strconv"
 )
 
-func WrongLinesNumber(i int) error {
-	return fmt.Errorf("proto: wrong lines count: expected 3 but got %d", i)
+func WrongTokensNumber(expected, got int) error {
+	return fmt.Errorf("proto: wrong tokens count: expected %d but got %d", expected, got)
 }
+
+func WrongCommand(cmd string) error {
+	return fmt.Errorf("proto: wrong command: expected one of %q, %q or %q but got %q", PUBLISH, SUBSCRIBE, MESSAGE, cmd)
+}
+
+var ErrInvalidProto = errors.New("invalid proto data")
 
 var (
 	PUBLISH   = []byte("PUB")
@@ -19,9 +27,10 @@ var (
 )
 
 type Proto struct {
-	Command string
-	Topic   string
-	Data    string
+	Command    string
+	Topic      string
+	PayloadLen int
+	Data       []byte
 }
 
 func (p Proto) Marshal() []byte {
@@ -38,26 +47,43 @@ func NewProtoReader(r io.Reader) *ProtoReader {
 }
 
 func (p *ProtoReader) Parse() (Proto, error) {
-	lines := make([][]byte, 3)
-	for i := 0; i < 3; i++ {
-		line, err := p.reader.ReadLineBytes()
+	line, err := p.reader.ReadLineBytes()
+	if err != nil {
+		return Proto{}, err
+	}
+
+	line = bytes.TrimSpace(line)
+	tokens := bytes.Split(line, []byte(" "))
+	if len(tokens) < 1 {
+		return Proto{}, WrongTokensNumber(1, 0)
+	}
+
+	switch {
+	case bytes.HasPrefix(line, PUBLISH):
+		if len(tokens) < 3 {
+			return Proto{}, WrongTokensNumber(3, len(tokens))
+		}
+
+		payloadLen, err := strconv.Atoi(string(tokens[2]))
 		if err != nil {
 			return Proto{}, err
 		}
 
-		lines[i] = line
+		payload := make([]byte, payloadLen)
+		_, err = p.reader.R.Read(payload)
+		if err != nil {
+			return Proto{}, err
+		}
+
+		return Proto{
+			Command:    string(PUBLISH),
+			Topic:      string(tokens[1]),
+			PayloadLen: payloadLen,
+			Data:       payload,
+		}, nil
 	}
 
-	command := bytes.TrimSpace(lines[0])
-	if !bytes.Equal(command, PUBLISH) && !bytes.Equal(command, SUBSCRIBE) && !bytes.Equal(command, MESSAGE) {
-		return Proto{}, fmt.Errorf("proto: wrong command: expected one of %q, %q or %q but got %q", PUBLISH, SUBSCRIBE, MESSAGE, command)
-	}
-
-	return Proto{
-		Command: string(command),
-		Topic:   string(bytes.TrimSpace(lines[1])),
-		Data:    string(bytes.TrimSpace(lines[2])),
-	}, nil
+	return Proto{}, WrongCommand(string(tokens[0]))
 }
 
 type ProtoWriter struct {
