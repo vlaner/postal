@@ -15,15 +15,16 @@ func WrongTokensNumber(expected, got int) error {
 }
 
 func WrongCommand(cmd string) error {
-	return fmt.Errorf("proto: wrong command: expected one of %q, %q or %q but got %q", PUBLISH, SUBSCRIBE, MESSAGE, cmd)
+	return fmt.Errorf("proto: wrong command: expected one of %q, %q, %q  or %q but got %q", PUBLISH, SUBSCRIBE, MESSAGE, UNSUBSCRIBE, cmd)
 }
 
 var ErrInvalidProto = errors.New("invalid proto data")
 
 var (
-	PUBLISH   = []byte("PUB")
-	SUBSCRIBE = []byte("SUB")
-	MESSAGE   = []byte("MSG")
+	PUBLISH     = []byte("PUB")
+	SUBSCRIBE   = []byte("SUB")
+	UNSUBSCRIBE = []byte("UNSUB")
+	MESSAGE     = []byte("MSG")
 )
 
 type Proto struct {
@@ -94,6 +95,16 @@ func (p *ProtoReader) Parse() (Proto, error) {
 
 		return Proto{
 			Command: string(SUBSCRIBE),
+			Topic:   string(tokens[1]),
+		}, nil
+
+	case bytes.HasPrefix(line, UNSUBSCRIBE):
+		if len(tokens) < 2 {
+			return Proto{}, WrongTokensNumber(2, len(tokens))
+		}
+
+		return Proto{
+			Command: string(UNSUBSCRIBE),
 			Topic:   string(tokens[1]),
 		}, nil
 	}

@@ -161,3 +161,26 @@ func TestMessageNack(t *testing.T) {
 
 	b.Stop()
 }
+
+func TestUnsubscribe(t *testing.T) {
+	b := broker.NewBroker()
+	go b.Run()
+
+	topic := "test"
+
+	tc := newTestPubSub(t, b)
+	tc.subscribe(topic)
+	testtopic := b.Topics()[0]
+	if len(testtopic.Consumers) != 1 {
+		t.Errorf("got wrong consumer length: expected 1 got %d", len(testtopic.Consumers))
+	}
+
+	b.Remove(tc.ch)
+	runtime.Gosched()
+
+	testtopic = b.Topics()[0]
+	if len(testtopic.Consumers) != 0 {
+		t.Errorf("got wrong consumer length: expected 0 got %d", len(testtopic.Consumers))
+	}
+	b.Stop()
+}

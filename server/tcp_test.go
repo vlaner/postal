@@ -13,6 +13,7 @@ type fakeBroker struct{}
 
 func (b fakeBroker) Publish(broker.Message)           {}
 func (b fakeBroker) Register(broker.SubscribeRequest) {}
+func (b fakeBroker) Remove(chan broker.Message)       {}
 
 func TestSimpleServer(t *testing.T) {
 	b := fakeBroker{}

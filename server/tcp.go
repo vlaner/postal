@@ -23,6 +23,7 @@ type Client struct {
 type Broker interface {
 	Publish(msg broker.Message)
 	Register(req broker.SubscribeRequest)
+	Remove(ch chan broker.Message)
 }
 
 type TCPServer struct {
@@ -167,6 +168,8 @@ func (s *TCPServer) handleClient(client Client) {
 				}
 
 				s.broker.Publish(broker.Message{ID: msgID, Topic: proto.Topic, Payload: proto.Data})
+			case string(UNSUBSCRIBE):
+				s.broker.Remove(client.msgCh)
 			}
 		}
 	}
