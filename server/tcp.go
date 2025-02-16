@@ -147,6 +147,10 @@ func (s *TCPServer) handleClient(client Client) {
 		default:
 			proto, err := r.Parse()
 			if err != nil {
+				var opErr *net.OpError
+				if errors.As(err, &opErr) && !opErr.Temporary() {
+					return
+				}
 				if errors.Is(err, io.EOF) {
 					return
 				}
