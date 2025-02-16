@@ -2,12 +2,24 @@ package broker
 
 import (
 	"sync"
+	"time"
 )
 
 type Message struct {
-	ID      string
-	Topic   string
-	Payload []byte
+	ID          string
+	Topic       string
+	Payload     []byte
+	SentAt      time.Time
+	DeliveredAt time.Time
+}
+
+func NewMessage(id, topic string, payload []byte) Message {
+	return Message{
+		ID:      id,
+		Topic:   topic,
+		Payload: payload,
+		SentAt:  time.Now(),
+	}
 }
 
 type Topic struct {
@@ -30,10 +42,13 @@ type Broker struct {
 	msgsCh    chan Message
 	msgAckCh  chan string
 	msgNackCh chan string
-	unacked   map[string]Message
+	unacked   map[string]*Message
 	deliverCh chan struct{}
 
 	quitCh chan struct{}
+
+	unackedTickerDuration time.Duration
+	unackedTimeout        time.Duration
 }
 
 func NewBroker() *Broker {
@@ -44,16 +59,21 @@ func NewBroker() *Broker {
 		remove:    make(chan chan Message),
 		msgAckCh:  make(chan string),
 		msgNackCh: make(chan string),
-		unacked:   make(map[string]Message),
+		unacked:   make(map[string]*Message),
 		// deliver channel size of 1 because we have single goroutine to handle channel
-		deliverCh: make(chan struct{}, 1),
-		quitCh:    make(chan struct{}),
+		deliverCh:             make(chan struct{}, 1),
+		quitCh:                make(chan struct{}),
+		unackedTickerDuration: 3 * time.Second,
+		unackedTimeout:        5 * time.Second,
 	}
 
 	return b
 }
 
 func (b *Broker) Run() {
+	unackedTicker := time.NewTicker(b.unackedTickerDuration)
+	defer unackedTicker.Stop()
+
 	for {
 		select {
 		case sub := <-b.register:
@@ -72,12 +92,7 @@ func (b *Broker) Run() {
 			b.mu.Unlock()
 
 		case msg := <-b.msgsCh:
-			topic := b.getOrCreateTopic(msg.Topic)
-			topic.queue.Enqueue(msg)
-
-			b.unacked[msg.ID] = msg
-
-			b.deliverSignal()
+			b.queueMessage(msg)
 
 		case <-b.deliverCh:
 			b.deliverMessages()
@@ -87,6 +102,9 @@ func (b *Broker) Run() {
 
 		case msgID := <-b.msgNackCh:
 			b.nack(msgID)
+
+		case <-unackedTicker.C:
+			b.checkUnacked()
 
 		case <-b.quitCh:
 			return
@@ -122,7 +140,7 @@ func (b *Broker) Unacked() []Message {
 
 	i := 0
 	for _, msg := range b.unacked {
-		msgs[i] = msg
+		msgs[i] = *msg
 		i++
 	}
 
@@ -142,6 +160,28 @@ func (b *Broker) Topics() []Topic {
 	}
 
 	return topics
+}
+
+func (b *Broker) checkUnacked() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	now := time.Now()
+	for _, unackedMsg := range b.unacked {
+		if unackedMsg.DeliveredAt.Add(b.unackedTimeout).After(now) {
+			delete(b.unacked, unackedMsg.ID)
+			b.queueMessage(*unackedMsg)
+		}
+	}
+}
+
+func (b *Broker) queueMessage(msg Message) {
+	topic := b.getOrCreateTopic(msg.Topic)
+	topic.queue.Enqueue(msg)
+
+	b.unacked[msg.ID] = &msg
+
+	b.deliverSignal()
 }
 
 func (b *Broker) ack(msgID string) {
@@ -198,17 +238,18 @@ func (b *Broker) deliverMessages() {
 			}
 
 			message := msg.(Message)
+			message.DeliveredAt = time.Now()
 			for _, c := range t.Consumers {
 				select {
 				case c <- message:
+					// TODO: ack for many consumers
+					b.mu.Lock()
+					b.unacked[message.ID] = &message
+					b.mu.Unlock()
 				default:
 					// TODO: requeue for many consumers
 				}
 
-				// TODO: ack for many consumers
-				b.mu.Lock()
-				b.unacked[message.ID] = message
-				b.mu.Unlock()
 			}
 		}
 	}
