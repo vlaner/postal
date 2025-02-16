@@ -112,10 +112,12 @@ func (s *TCPServer) acceptLoop() {
 }
 
 func (s *TCPServer) handleClient(client Client) {
-	defer client.conn.Close()
-	defer s.connWg.Done()
 	defer func() {
+		client.conn.Close()
+		s.connWg.Done()
 		s.clients.Delete(client.conn)
+		s.broker.Remove(client.msgCh)
+		close(client.msgCh)
 	}()
 
 	r := NewProtoReader(client.conn)
@@ -130,6 +132,10 @@ func (s *TCPServer) handleClient(client Client) {
 			case msg := <-client.msgCh:
 				err := w.Write(Proto{MessageID: msg.ID, Command: string(MESSAGE), Topic: msg.Topic, PayloadLen: len(msg.Payload), Data: msg.Payload})
 				if err != nil {
+					var opErr *net.OpError
+					if errors.As(err, &opErr) && !opErr.Temporary() {
+						return
+					}
 					log.Printf("server: write proto to client %v\n", err)
 				}
 			}
