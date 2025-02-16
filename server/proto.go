@@ -25,9 +25,11 @@ var (
 	SUBSCRIBE   = []byte("SUB")
 	UNSUBSCRIBE = []byte("UNSUB")
 	MESSAGE     = []byte("MSG")
+	ACK         = []byte("ACK")
 )
 
 type Proto struct {
+	MessageID  string
 	Command    string
 	Topic      string
 	PayloadLen int
@@ -37,7 +39,7 @@ type Proto struct {
 func (p Proto) Marshal() []byte {
 	switch p.Command {
 	case string(MESSAGE):
-		return []byte(fmt.Sprintf("%s %s %d\r\n%s\r\n", p.Command, p.Topic, len(p.Data), p.Data))
+		return []byte(fmt.Sprintf("%s %s %s %d\r\n%s\r\n", p.Command, p.Topic, p.MessageID, len(p.Data), p.Data))
 	}
 
 	return nil
@@ -106,6 +108,16 @@ func (p *ProtoReader) Parse() (Proto, error) {
 		return Proto{
 			Command: string(UNSUBSCRIBE),
 			Topic:   string(tokens[1]),
+		}, nil
+
+	case bytes.HasPrefix(line, ACK):
+		if len(tokens) < 2 {
+			return Proto{}, WrongTokensNumber(2, len(tokens))
+		}
+
+		return Proto{
+			Command:   string(ACK),
+			MessageID: string(tokens[1]),
 		}, nil
 	}
 

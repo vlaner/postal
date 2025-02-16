@@ -24,6 +24,7 @@ type Broker interface {
 	Publish(msg broker.Message)
 	Register(req broker.SubscribeRequest)
 	Remove(ch chan broker.Message)
+	Ack(msgID string)
 }
 
 type TCPServer struct {
@@ -127,7 +128,7 @@ func (s *TCPServer) handleClient(client Client) {
 			case <-s.quit:
 				return
 			case msg := <-client.msgCh:
-				err := w.Write(Proto{Command: string(MESSAGE), Topic: msg.Topic, PayloadLen: len(msg.Payload), Data: msg.Payload})
+				err := w.Write(Proto{MessageID: msg.ID, Command: string(MESSAGE), Topic: msg.Topic, PayloadLen: len(msg.Payload), Data: msg.Payload})
 				if err != nil {
 					log.Printf("server: write proto to client %v\n", err)
 				}
@@ -171,9 +172,11 @@ func (s *TCPServer) handleClient(client Client) {
 					continue
 				}
 
-				s.broker.Publish(broker.Message{ID: msgID, Topic: proto.Topic, Payload: proto.Data})
+				s.broker.Publish(broker.NewMessage(msgID, proto.Topic, proto.Data))
 			case string(UNSUBSCRIBE):
 				s.broker.Remove(client.msgCh)
+			case string(ACK):
+				s.broker.Ack(proto.MessageID)
 			}
 		}
 	}
