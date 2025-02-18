@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"sync"
 	"time"
 )
 
@@ -34,15 +33,14 @@ type SubscribeRequest struct {
 }
 
 type Broker struct {
-	topics map[string]*Topic
-	mu     sync.RWMutex
+	topics *SyncMap[*Topic]
 
 	register  chan SubscribeRequest
 	remove    chan chan Message
 	msgsCh    chan Message
 	msgAckCh  chan string
 	msgNackCh chan string
-	unacked   map[string]*Message
+	unacked   *SyncMap[*Message]
 	deliverCh chan struct{}
 
 	quitCh chan struct{}
@@ -53,13 +51,13 @@ type Broker struct {
 
 func NewBroker() *Broker {
 	b := &Broker{
-		topics:    make(map[string]*Topic),
+		topics:    NewSyncMap[*Topic](),
 		msgsCh:    make(chan Message),
 		register:  make(chan SubscribeRequest),
 		remove:    make(chan chan Message),
 		msgAckCh:  make(chan string),
 		msgNackCh: make(chan string),
-		unacked:   make(map[string]*Message),
+		unacked:   NewSyncMap[*Message](),
 		// deliver channel size of 1 because we have single goroutine to handle channel
 		deliverCh:             make(chan struct{}, 1),
 		quitCh:                make(chan struct{}),
@@ -80,8 +78,8 @@ func (b *Broker) Run() {
 			b.newRegister(sub)
 
 		case subCh := <-b.remove:
-			b.mu.Lock()
-			for _, topic := range b.topics {
+			b.topics.mu.Lock()
+			for _, topic := range b.topics.m {
 				for i, consumerCh := range topic.Consumers {
 					if consumerCh == subCh {
 						topic.Consumers = append(topic.Consumers[:i], topic.Consumers[i+1:]...)
@@ -89,7 +87,7 @@ func (b *Broker) Run() {
 					}
 				}
 			}
-			b.mu.Unlock()
+			b.topics.mu.Unlock()
 
 		case msg := <-b.msgsCh:
 			b.queueMessage(msg)
@@ -133,13 +131,13 @@ func (b *Broker) Nack(msgID string) {
 }
 
 func (b *Broker) Unacked() []Message {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.unacked.mu.RLock()
+	defer b.unacked.mu.RUnlock()
 
-	msgs := make([]Message, len(b.unacked))
+	msgs := make([]Message, len(b.unacked.m))
 
 	i := 0
-	for _, msg := range b.unacked {
+	for _, msg := range b.unacked.m {
 		msgs[i] = *msg
 		i++
 	}
@@ -148,13 +146,12 @@ func (b *Broker) Unacked() []Message {
 }
 
 func (b *Broker) Topics() []Topic {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.topics.mu.RLock()
+	defer b.topics.mu.RUnlock()
 
-	topics := make([]Topic, len(b.topics))
-
+	topics := make([]Topic, len(b.topics.m))
 	i := 0
-	for _, topic := range b.topics {
+	for _, topic := range b.topics.m {
 		topics[i] = *topic
 		i++
 	}
@@ -163,13 +160,10 @@ func (b *Broker) Topics() []Topic {
 }
 
 func (b *Broker) checkUnacked() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	now := time.Now()
-	for _, unackedMsg := range b.unacked {
+	for _, unackedMsg := range b.unacked.m {
 		if unackedMsg.DeliveredAt.Add(b.unackedTimeout).After(now) {
-			delete(b.unacked, unackedMsg.ID)
+			b.unacked.Delete(unackedMsg.ID)
 			b.queueMessage(*unackedMsg)
 		}
 	}
@@ -179,41 +173,32 @@ func (b *Broker) queueMessage(msg Message) {
 	topic := b.getOrCreateTopic(msg.Topic)
 	topic.queue.Enqueue(msg)
 
-	b.unacked[msg.ID] = &msg
+	b.unacked.Set(msg.ID, &msg)
 
 	b.deliverSignal()
 }
 
 func (b *Broker) ack(msgID string) {
-	b.mu.Lock()
-	delete(b.unacked, msgID)
-	b.mu.Unlock()
+	b.unacked.Delete(msgID)
 }
 
 func (b *Broker) nack(msgID string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	msg, ok := b.unacked[msgID]
+	msg, ok := b.unacked.Get(msgID)
 	if !ok {
 		return
 	}
-
-	delete(b.unacked, msgID)
+	b.unacked.Delete(msgID)
 
 	msgTopic := b.getOrCreateTopic(msg.Topic)
-	msgTopic.queue.Enqueue(msg)
+	msgTopic.queue.Enqueue(*msg)
 
 	b.deliverSignal()
 }
 
 func (b *Broker) newRegister(sub SubscribeRequest) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	topic := b.getOrCreateTopic(sub.Topic)
 	topic.Consumers = append(topic.Consumers, sub.ConsumeCh)
-	b.topics[sub.Topic] = topic
+	b.topics.Set(sub.Topic, topic)
 
 	b.deliverSignal()
 }
@@ -226,7 +211,7 @@ func (b *Broker) deliverSignal() {
 }
 
 func (b *Broker) deliverMessages() {
-	for _, t := range b.topics {
+	for _, t := range b.topics.m {
 		if len(t.Consumers) == 0 {
 			return
 		}
@@ -243,9 +228,7 @@ func (b *Broker) deliverMessages() {
 				select {
 				case c <- message:
 					// TODO: ack for many consumers
-					b.mu.Lock()
-					b.unacked[message.ID] = &message
-					b.mu.Unlock()
+					b.unacked.Set(message.ID, &message)
 				default:
 					// TODO: requeue for many consumers
 				}
@@ -256,7 +239,7 @@ func (b *Broker) deliverMessages() {
 }
 
 func (b *Broker) getOrCreateTopic(name string) *Topic {
-	topic, exists := b.topics[name]
+	topic, exists := b.topics.Get(name)
 	if !exists {
 		topic = &Topic{
 			name:      name,
