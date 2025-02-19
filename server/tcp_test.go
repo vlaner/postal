@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/vlaner/postal/broker"
+	"github.com/vlaner/postal/schema"
 )
 
 type fakeBroker struct{}
 
-func (b fakeBroker) Publish(broker.Message)           {}
-func (b fakeBroker) Register(broker.SubscribeRequest) {}
-func (b fakeBroker) Remove(chan broker.Message)       {}
-func (b fakeBroker) Ack(string)                       {}
-
+func (b fakeBroker) Publish(broker.Message)              {}
+func (b fakeBroker) Register(broker.SubscribeRequest)    {}
+func (b fakeBroker) Remove(chan broker.Message)          {}
+func (b fakeBroker) Ack(string)                          {}
+func (b fakeBroker) SetSchema(string, schema.NodeSchema) {}
 func TestSimpleServer(t *testing.T) {
 	b := fakeBroker{}
 	port := ":9090"

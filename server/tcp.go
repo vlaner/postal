@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vlaner/postal/broker"
+	"github.com/vlaner/postal/schema"
 )
 
 type Client struct {
@@ -25,6 +26,7 @@ type Broker interface {
 	Register(req broker.SubscribeRequest)
 	Remove(ch chan broker.Message)
 	Ack(msgID string)
+	SetSchema(topicName string, schema schema.NodeSchema)
 }
 
 type TCPServer struct {
@@ -183,6 +185,20 @@ func (s *TCPServer) handleClient(client Client) {
 				s.broker.Remove(client.msgCh)
 			case string(ACK):
 				s.broker.Ack(proto.MessageID)
+			case string(SCHEMA):
+				p, err := schema.NewParserString(string(proto.Schema))
+				if err != nil {
+					log.Println("server: new schema parser: ", err)
+					continue
+				}
+
+				schem, err := p.Parse()
+				if err != nil {
+					log.Println("server:  parse schema: ", err)
+					continue
+				}
+
+				s.broker.SetSchema(proto.Topic, schem)
 			}
 		}
 	}

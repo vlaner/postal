@@ -26,6 +26,7 @@ var (
 	UNSUBSCRIBE = []byte("UNSUB")
 	MESSAGE     = []byte("MSG")
 	ACK         = []byte("ACK")
+	SCHEMA      = []byte("SCHEMA")
 )
 
 type Proto struct {
@@ -34,6 +35,7 @@ type Proto struct {
 	Topic      string
 	PayloadLen int
 	Data       []byte
+	Schema     string
 }
 
 func (p Proto) Marshal() []byte {
@@ -118,6 +120,28 @@ func (p *ProtoReader) Parse() (Proto, error) {
 		return Proto{
 			Command:   string(ACK),
 			MessageID: string(tokens[1]),
+		}, nil
+
+	case bytes.HasPrefix(line, SCHEMA):
+		if len(tokens) < 3 {
+			return Proto{}, WrongTokensNumber(3, len(tokens))
+		}
+
+		schemaLen, err := strconv.Atoi(string(tokens[2]))
+		if err != nil {
+			return Proto{}, err
+		}
+
+		schemaBytes := make([]byte, schemaLen)
+		_, err = p.reader.R.Read(schemaBytes)
+		if err != nil {
+			return Proto{}, err
+		}
+
+		return Proto{
+			Command: string(SCHEMA),
+			Topic:   string(tokens[1]),
+			Schema:  string(schemaBytes),
 		}, nil
 	}
 

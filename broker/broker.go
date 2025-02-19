@@ -1,7 +1,11 @@
 package broker
 
 import (
+	"encoding/json"
+	"log"
 	"time"
+
+	"github.com/vlaner/postal/schema"
 )
 
 type Message struct {
@@ -25,6 +29,7 @@ type Topic struct {
 	name      string
 	queue     *Queue
 	Consumers []chan Message
+	schema    *schema.NodeSchema
 }
 
 type SubscribeRequest struct {
@@ -159,6 +164,12 @@ func (b *Broker) Topics() []Topic {
 	return topics
 }
 
+func (b *Broker) SetSchema(topicName string, schema schema.NodeSchema) {
+	if topic, exists := b.topics.Get(topicName); exists {
+		topic.schema = &schema
+	}
+}
+
 func (b *Broker) checkUnacked() {
 	now := time.Now()
 	for _, unackedMsg := range b.unacked.m {
@@ -172,6 +183,23 @@ func (b *Broker) checkUnacked() {
 func (b *Broker) queueMessage(msg Message) {
 	topic := b.getOrCreateTopic(msg.Topic)
 	topic.queue.Enqueue(msg)
+	if topic.schema != nil {
+		log.Println("PAYLOAD IS ", string(msg.Payload))
+
+		var data map[string]interface{}
+		if err := json.Unmarshal(msg.Payload, &data); err != nil {
+			log.Println("UNMARSHAL SCHEMA PAYLOAD", err)
+			return
+		}
+
+		log.Println("DATA IS ", data)
+
+		err := schema.ValidateMap(*topic.schema, data)
+		if err != nil {
+			log.Println("ERROR VALIDATE BYTES", err)
+			return
+		}
+	}
 
 	b.unacked.Set(msg.ID, &msg)
 
@@ -245,6 +273,7 @@ func (b *Broker) getOrCreateTopic(name string) *Topic {
 			name:      name,
 			queue:     NewQueue(),
 			Consumers: make([]chan Message, 0),
+			schema:    nil,
 		}
 	}
 

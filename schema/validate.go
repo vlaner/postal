@@ -87,3 +87,55 @@ func validateNode(node Node, val reflect.Value) error {
 
 	return nil
 }
+
+func ValidateMap(schema NodeSchema, data map[string]any) error {
+	for _, assign := range schema.body {
+		key := assign.ident.String()
+		var foundKey string
+
+		for k := range data {
+			if strings.EqualFold(k, key) {
+				foundKey = k
+				break
+			}
+		}
+
+		if foundKey == "" {
+			return fmt.Errorf("missing field %q in payload", key)
+		}
+
+		value := data[foundKey]
+		if err := validateNodeMap(assign.val, value); err != nil {
+			return fmt.Errorf("validate field %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func validateNodeMap(node Node, value interface{}) error {
+	switch n := node.(type) {
+	case NodeLiteral:
+		switch n.name {
+		case "int":
+			_, ok := value.(int)
+			if !ok {
+				return fmt.Errorf("expected number, got %T", value)
+			}
+		case "str":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("expected string, got %T", value)
+			}
+		default:
+			return fmt.Errorf("unsupported literal type: %s", n.name)
+		}
+	case NodeSchema:
+		m, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object for nested schema, got %T", value)
+		}
+		return ValidateMap(n, m)
+	default:
+		return fmt.Errorf("unknown node type: %T", node)
+	}
+	return nil
+}
